@@ -1,64 +1,157 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:location/location.dart';
 import 'package:vibration/vibration.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
-  runApp(const MyApp());
+// ============================================================
+// MODELO DE CONTACTO
+// ============================================================
+
+class Contacto {
+  String id;
+  String nombre;
+  String telefono;
+  bool esEmergencia;
+
+  Contacto({
+    required this.id,
+    required this.nombre,
+    required this.telefono,
+    this.esEmergencia = false,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'nombre': nombre,
+      'telefono': telefono,
+      'esEmergencia': esEmergencia,
+    };
+  }
+
+  factory Contacto.fromJson(Map<String, dynamic> json) {
+    return Contacto(
+      id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      nombre: json['nombre'] ?? 'Contacto',
+      telefono: json['telefono'] ?? '',
+      esEmergencia: json['esEmergencia'] ?? false,
+    );
+  }
 }
+
+// ============================================================
+// PROVIDER
+// ============================================================
 
 class EmergenciaProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _hasPermission = false;
   String _mensaje = 'Presiona el botón en caso de emergencia';
-  Position? _ubicacion;
-  List<String> _contactos = [];
+  LocationData? _ubicacion;
+  List<Contacto> _contactos = [];
+  String _estadoUsuario = 'Estoy bien';
 
   bool get isLoading => _isLoading;
   bool get hasPermission => _hasPermission;
   String get mensaje => _mensaje;
-  Position? get ubicacion => _ubicacion;
-  List<String> get contactos => _contactos;
+  LocationData? get ubicacion => _ubicacion;
+  List<Contacto> get contactos => _contactos;
+  String get estadoUsuario => _estadoUsuario;
+
+  final Location _location = Location();
 
   EmergenciaProvider() {
     _cargarContactos();
+    _cargarEstado();
+    _verificarPermisos();
   }
 
   Future<void> _cargarContactos() async {
     final prefs = await SharedPreferences.getInstance();
-    _contactos = prefs.getStringList('contactosEmergencia') ?? [];
+    final contactosJson = prefs.getStringList('contactosEmergencia') ?? [];
+    _contactos = contactosJson
+        .map((json) => Contacto.fromJson(json as Map<String, dynamic>))
+        .toList();
     notifyListeners();
   }
 
-  Future<void> guardarContactos(List<String> nuevosContactos) async {
+  Future<void> guardarContactos() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('contactosEmergencia', nuevosContactos);
-    _contactos = nuevosContactos;
+    final contactosJson = _contactos.map((c) => c.toJson()).toList();
+    await prefs.setStringList(
+      'contactosEmergencia',
+      contactosJson.map((c) => c.toString()).toList(),
+    );
     notifyListeners();
   }
 
-  Future<void> verificarPermisos() async {
+  void agregarContacto(String nombre, String telefono) {
+    final nuevoContacto = Contacto(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      nombre: nombre.isNotEmpty ? nombre : 'Contacto',
+      telefono: telefono,
+      esEmergencia: true,
+    );
+    _contactos.add(nuevoContacto);
+    guardarContactos();
+    notifyListeners();
+  }
+
+  void eliminarContacto(String id) {
+    _contactos.removeWhere((c) => c.id == id);
+    guardarContactos();
+    notifyListeners();
+  }
+
+  void cambiarEstado(String nuevoEstado) {
+    _estadoUsuario = nuevoEstado;
+    _guardarEstado();
+    notifyListeners();
+  }
+
+  Future<void> _cargarEstado() async {
+    final prefs = await SharedPreferences.getInstance();
+    _estadoUsuario = prefs.getString('estadoUsuario') ?? 'Estoy bien';
+    notifyListeners();
+  }
+
+  Future<void> _guardarEstado() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('estadoUsuario', _estadoUsuario);
+  }
+
+  Future<void> _verificarPermisos() async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+      bool serviceEnabled = await _location.serviceEnabled();
+      if (!serviceEnabled) {
+        serviceEnabled = await _location.requestService();
+        if (!serviceEnabled) {
+          _mensaje = '⚠️ Servicio de ubicación no disponible';
+          _isLoading = false;
+          notifyListeners();
+          return;
+        }
+      }
+
+      PermissionStatus permissionGranted = await _location.hasPermission();
+      if (permissionGranted == PermissionStatus.denied) {
+        permissionGranted = await _location.requestPermission();
+        if (permissionGranted != PermissionStatus.granted) {
+          _mensaje = '⚠️ Permisos de ubicación denegados';
+          _isLoading = false;
+          notifyListeners();
+          return;
+        }
       }
       
-      _hasPermission = permission == LocationPermission.always || 
-                      permission == LocationPermission.whileInUse;
-      
-      if (_hasPermission) {
-        _mensaje = '✅ Permisos concedidos - Listo para emergencias';
-        await _obtenerUbicacion();
-      } else {
-        _mensaje = '⚠️ Permisos necesarios para enviar ubicación';
-      }
+      _hasPermission = true;
+      _mensaje = '✅ Permisos concedidos - Listo para emergencias';
+      await _obtenerUbicacion();
       
     } catch (e) {
       _mensaje = '❌ Error al verificar permisos: $e';
@@ -70,9 +163,7 @@ class EmergenciaProvider extends ChangeNotifier {
 
   Future<void> _obtenerUbicacion() async {
     try {
-      _ubicacion = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      _ubicacion = await _location.getLocation();
       _mensaje = '📍 Ubicación obtenida correctamente';
     } catch (e) {
       _mensaje = '⚠️ No se pudo obtener ubicación: $e';
@@ -80,9 +171,9 @@ class EmergenciaProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> enviarEmergencia(BuildContext context) async {
+  Future<void> enviarEmergencia(BuildContext context, {bool esPrueba = false}) async {
     if (!_hasPermission) {
-      await verificarPermisos();
+      await _verificarPermisos();
       if (!_hasPermission) {
         _mostrarError(context, 'Permisos necesarios para enviar alerta');
         return;
@@ -95,7 +186,7 @@ class EmergenciaProvider extends ChangeNotifier {
     }
 
     _isLoading = true;
-    _mensaje = '🚨 Enviando alerta de emergencia...';
+    _mensaje = esPrueba ? '🧪 Enviando mensaje de prueba...' : '🚨 Enviando alerta de emergencia...';
     notifyListeners();
 
     try {
@@ -105,29 +196,33 @@ class EmergenciaProvider extends ChangeNotifier {
         throw Exception('No se pudo obtener la ubicación');
       }
 
-      final mensajeEmergencia = '''
-🚨 ¡ALERTA DE EMERGENCIA! 
-📍 Mi ubicación: 
-https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
+      final mensaje = esPrueba
+          ? _construirMensajePrueba()
+          : _construirMensajeEmergencia();
 
-📱 App de Emergencia - Botón de Pánico
-''';
-
+      int enviados = 0;
       for (var contacto in _contactos) {
-        final whatsappUrl = Uri.parse(
-          'https://wa.me/$contacto?text=${Uri.encodeComponent(mensajeEmergencia)}'
-        );
-        
-        if (await canLaunchUrl(whatsappUrl)) {
-          await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+        try {
+          final whatsappUrl = Uri.parse(
+            'https://wa.me/${contacto.telefono}?text=${Uri.encodeComponent(mensaje)}'
+          );
+          if (await canLaunchUrl(whatsappUrl)) {
+            await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+            enviados++;
+          }
+        } catch (e) {
+          print('Error WhatsApp a ${contacto.telefono}: $e');
         }
       }
 
-      _mensaje = '✅ ¡Alerta enviada a ${_contactos.length} contactos!';
-      _mostrarExito(context);
+      _mensaje = esPrueba
+          ? '✅ Mensaje de prueba enviado a $enviados contactos'
+          : '✅ ¡Alerta enviada a $enviados contactos!';
+      
+      _mostrarExito(context, esPrueba);
 
     } catch (e) {
-      _mensaje = '❌ Error al enviar alerta: $e';
+      _mensaje = '❌ Error al enviar: $e';
       _mostrarError(context, 'Error al enviar: $e');
     }
 
@@ -135,12 +230,39 @@ https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
     notifyListeners();
   }
 
-  void _mostrarExito(BuildContext context) {
+  String _construirMensajeEmergencia() {
+    return '''
+🚨 ¡ALERTA DE EMERGENCIA! 
+👤 Estado: $_estadoUsuario
+📍 Mi ubicación: 
+https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
+
+📱 App de Emergencia - Botón de Pánico
+⚠️ SOLO USAR EN CASO DE EMERGENCIA REAL
+''';
+  }
+
+  String _construirMensajePrueba() {
+    return '''
+🧪 MENSAJE DE PRUEBA - APP DE EMERGENCIA
+✅ Estoy probando mi app de emergencia, todo bien
+📍 Mi ubicación: 
+https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
+
+📱 App de Emergencia - Botón de Pánico
+''';
+  }
+
+  void _mostrarExito(BuildContext context, bool esPrueba) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('🚨 ¡ALERTA ENVIADA! Tus contactos han sido notificados'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 4),
+      SnackBar(
+        content: Text(
+          esPrueba 
+            ? '🧪 Mensaje de prueba enviado exitosamente'
+            : '🚨 ¡ALERTA ENVIADA! Tus contactos han sido notificados'
+        ),
+        backgroundColor: esPrueba ? Colors.blue : Colors.green,
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -156,13 +278,21 @@ https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
   }
 }
 
+// ============================================================
+// PANTALLA PRINCIPAL
+// ============================================================
+
+void main() {
+  runApp(const MyApp());
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => EmergenciaProvider()..verificarPermisos(),
+      create: (_) => EmergenciaProvider(),
       child: MaterialApp(
         title: 'Botón de Pánico',
         theme: ThemeData(
@@ -225,75 +355,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       body: SafeArea(
         child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: provider.hasPermission ? Colors.green.shade50 : Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: provider.hasPermission ? Colors.green.shade300 : Colors.orange.shade300,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    provider.hasPermission ? Icons.check_circle : Icons.warning,
-                    color: provider.hasPermission ? Colors.green : Colors.orange,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      provider.mensaje,
-                      style: TextStyle(
-                        color: provider.hasPermission ? Colors.green.shade800 : Colors.orange.shade800,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.shade300),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.people, color: Colors.blue, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Contactos de emergencia: ${provider.contactos.length}',
-                    style: TextStyle(
-                      color: Colors.blue.shade800,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 16),
-            
+            _buildStatusCard(provider),
+            _buildEstadoUsuario(provider),
+            const SizedBox(height: 8),
             Expanded(
               child: Center(
                 child: AnimatedBuilder(
                   animation: _pulseController,
                   builder: (context, child) {
                     return GestureDetector(
-                      onTap: () => _handleEmergencia(context, provider),
-                      onLongPress: () => _handleEmergencia(context, provider),
+                      onTap: () => _handleEmergencia(context, provider, false),
+                      onLongPress: () => _handleEmergencia(context, provider, false),
                       child: Transform.scale(
                         scale: 1.0 + (0.03 * _pulseController.value),
                         child: Container(
-                          width: 280,
-                          height: 280,
+                          width: 250,
+                          height: 250,
                           decoration: BoxDecoration(
                             gradient: const RadialGradient(
                               colors: [
@@ -329,28 +406,26 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                     Icon(
                                       Icons.warning_rounded,
                                       color: Colors.white,
-                                      size: 80,
+                                      size: 60,
                                     ),
-                                    SizedBox(height: 12),
+                                    SizedBox(height: 8),
                                     Text(
                                       '¡EMERGENCIA!',
                                       style: TextStyle(
                                         color: Colors.white,
-                                        fontSize: 28,
+                                        fontSize: 22,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: 2,
                                       ),
                                     ),
-                                    SizedBox(height: 8),
+                                    SizedBox(height: 4),
                                     Text(
                                       'Presiona para pedir ayuda',
                                       style: TextStyle(
                                         color: Colors.white70,
-                                        fontSize: 16,
+                                        fontSize: 14,
                                       ),
                                     ),
-                                    SizedBox(height: 12),
-                                    SizedBox(height: 30),
                                   ],
                                 ),
                         ),
@@ -360,28 +435,108 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
               ),
             ),
-            
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  const Text(
-                    '⚠️ Solo usar en caso de emergencia real',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  if (provider.ubicacion != null)
-                    Text(
-                      '📍 ${provider.ubicacion!.latitude.toStringAsFixed(6)}, ${provider.ubicacion!.longitude.toStringAsFixed(6)}',
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 11,
-                      ),
-                    ),
-                ],
+            _buildBotonPrueba(provider),
+            _buildFooter(provider),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusCard(EmergenciaProvider provider) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: provider.hasPermission ? Colors.green.shade50 : Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: provider.hasPermission ? Colors.green.shade300 : Colors.orange.shade300,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            provider.hasPermission ? Icons.check_circle : Icons.warning,
+            color: provider.hasPermission ? Colors.green : Colors.orange,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              provider.mensaje,
+              style: TextStyle(
+                color: provider.hasPermission ? Colors.green.shade800 : Colors.orange.shade800,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEstadoUsuario(EmergenciaProvider provider) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('Estado: ', style: TextStyle(fontWeight: FontWeight.bold)),
+          _buildEstadoBoton(
+            context,
+            'Estoy bien',
+            Icons.check_circle,
+            Colors.green,
+            provider.estadoUsuario == 'Estoy bien',
+            () => provider.cambiarEstado('Estoy bien'),
+          ),
+          const SizedBox(width: 8),
+          _buildEstadoBoton(
+            context,
+            'Necesito ayuda',
+            Icons.help,
+            Colors.red,
+            provider.estadoUsuario == 'Necesito ayuda',
+            () => provider.cambiarEstado('Necesito ayuda'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEstadoBoton(
+    BuildContext context,
+    String label,
+    IconData icon,
+    Color color,
+    bool isSelected,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withOpacity(0.2) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: isSelected ? Border.all(color: color, width: 2) : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: isSelected ? color : Colors.grey, size: 16),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? color : Colors.grey,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
           ],
@@ -390,20 +545,75 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  void _handleEmergencia(BuildContext context, EmergenciaProvider provider) async {
+  Widget _buildBotonPrueba(EmergenciaProvider provider) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ElevatedButton.icon(
+        onPressed: provider.isLoading ? null : () => _handleEmergencia(context, provider, true),
+        icon: const Icon(Icons.check_circle_outline, size: 18),
+        label: const Text('🧪 Enviar mensaje de prueba'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(double.infinity, 40),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFooter(EmergenciaProvider provider) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        children: [
+          Text(
+            'Contactos: ${provider.contactos.length}',
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            '⚠️ Solo usar en caso de emergencia real',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 2),
+          if (provider.ubicacion != null)
+            Text(
+              '📍 ${provider.ubicacion!.latitude?.toStringAsFixed(6) ?? "N/A"}, ${provider.ubicacion!.longitude?.toStringAsFixed(6) ?? "N/A"}',
+              style: const TextStyle(
+                color: Colors.grey,
+                fontSize: 10,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _handleEmergencia(BuildContext context, EmergenciaProvider provider, bool esPrueba) async {
     if (await Vibration.hasVibrator() ?? false) {
       Vibration.vibrate(duration: 200);
     }
+    
+    final titulo = esPrueba ? '🧪 Enviar mensaje de prueba' : '🚨 Confirmar emergencia';
+    final mensaje = esPrueba
+        ? '¿Enviar mensaje de prueba a tus contactos?'
+        : '¿Estás seguro que deseas enviar una alerta de emergencia?';
     
     final confirm = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
       builder: (context) => AlertDialog(
-        title: const Text('🚨 Confirmar emergencia'),
-        content: const Text(
-          '¿Estás seguro que deseas enviar una alerta de emergencia?',
-          style: TextStyle(fontSize: 16),
-        ),
+        title: Text(titulo),
+        content: Text(mensaje, style: const TextStyle(fontSize: 16)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -412,17 +622,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: esPrueba ? Colors.blue : Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Enviar alerta'),
+            child: Text(esPrueba ? 'Enviar prueba' : 'Enviar alerta'),
           ),
         ],
       ),
     );
     
     if (confirm == true) {
-      await provider.enviarEmergencia(context);
+      await provider.enviarEmergencia(context, esPrueba: esPrueba);
     }
   }
 
@@ -434,6 +644,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 }
 
+// ============================================================
+// CONFIGURACIÓN
+// ============================================================
+
 class ConfiguracionDialog extends StatefulWidget {
   const ConfiguracionDialog({super.key});
 
@@ -442,6 +656,7 @@ class ConfiguracionDialog extends StatefulWidget {
 }
 
 class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
+  final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _telefonoController = TextEditingController();
 
   @override
@@ -451,7 +666,7 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
     return AlertDialog(
       title: const Text('⚙️ Configuración'),
       content: SizedBox(
-        width: 300,
+        width: 350,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -461,21 +676,6 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            ...provider.contactos.map((contacto) => 
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.person, color: Colors.blue),
-                title: Text(contacto),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                  onPressed: () {
-                    final nuevos = List<String>.from(provider.contactos)
-                      ..remove(contacto);
-                    provider.guardarContactos(nuevos);
-                  },
-                ),
-              ),
-            ),
             if (provider.contactos.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(8.0),
@@ -484,10 +684,31 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
                   style: TextStyle(color: Colors.grey),
                 ),
               ),
+            ...provider.contactos.map((contacto) => 
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.person, color: Colors.blue),
+                title: Text(contacto.nombre),
+                subtitle: Text(contacto.telefono),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                  onPressed: () => provider.eliminarContacto(contacto.id),
+                ),
+              ),
+            ),
             const Divider(),
             const Text(
               'Agregar contacto:',
               style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nombreController,
+              decoration: const InputDecoration(
+                hintText: 'Nombre del contacto',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -507,9 +728,11 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
                 ElevatedButton(
                   onPressed: () {
                     if (_telefonoController.text.isNotEmpty) {
-                      final nuevos = List<String>.from(provider.contactos)
-                        ..add(_telefonoController.text);
-                      provider.guardarContactos(nuevos);
+                      provider.agregarContacto(
+                        _nombreController.text,
+                        _telefonoController.text,
+                      );
+                      _nombreController.clear();
                       _telefonoController.clear();
                     }
                   },
@@ -521,7 +744,7 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             const Text(
               '💡 Ejemplo: 573001234567 (Colombia)',
               style: TextStyle(fontSize: 10, color: Colors.grey),
@@ -540,6 +763,7 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
 
   @override
   void dispose() {
+    _nombreController.dispose();
     _telefonoController.dispose();
     super.dispose();
   }
