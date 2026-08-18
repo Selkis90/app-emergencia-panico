@@ -1,0 +1,40 @@
+name: app_emergencia_panico
+description: App de Emergencia y Botón de Pánico
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # UI/UX
+  cupertino_icons: ^1.0.6
+  
+  # Geolocalización
+  geolocator: ^10.1.0
+  
+  # Almacenamiento y Estado
+  shared_preferences: ^2.2.2
+  provider: ^6.0.5
+  
+  # Contactos y Mensajería
+  permission_handler: ^11.0.1
+  url_launcher: ^6.2.1
+  
+  # Utilidades
+  vibration: ^1.7.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icons/

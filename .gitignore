@@ -1,0 +1,77 @@
+# Flutter
+.dart_tool/
+.pub-cache/
+.pub/
+build/
+*.iml
+*.lock
+*.log
+*.pid
+*.swp
+.flutter-plugins
+.flutter-plugins-dependencies
+flutter_*.png
+flutter_*.zip
+
+# Android
+*.keystore
+*.jks
+*.apk
+*.aab
+android/app/google-services.json
+android/local.properties
+android/app/src/main/java/io/flutter/plugins/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+
+# iOS
+ios/Pods/
+ios/Podfile.lock
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+ios/Flutter/Generated.xcconfig
+ios/Flutter/app.flx
+ios/Flutter/app.zip
+ios/Flutter/flutter_assets/
+ios/ServiceDefinitions.json
+ios/Runner/GeneratedPluginRegistrant.*
+ios/Runner/Pods/
+ios/.symlinks/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Firebase
+google-services.json
+GoogleService-Info.plist
+firebase.json
+.firebase/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Coverage
+coverage/
+lcov.info
+
+# Testing
+test/.test_coverage.dart
+
+# Package
+*.pid
+*.lock
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Linux
+*.tmp
+*.temp
