@@ -5,6 +5,7 @@ import 'package:vibration/vibration.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 
 // ============================================================
 // MODELO DE CONTACTO
@@ -73,6 +74,10 @@ class EmergenciaProvider extends ChangeNotifier {
     _verificarPermisos();
   }
 
+  // ============================================================
+  // CONTACTOS - PERSISTENCIA
+  // ============================================================
+
   Future<void> _cargarContactos() async {
     final prefs = await SharedPreferences.getInstance();
     final contactosJson = prefs.getStringList('contactosEmergencia') ?? [];
@@ -110,6 +115,217 @@ class EmergenciaProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ============================================================
+  // SELECCIONAR CONTACTOS DE LA AGENDA
+  // ============================================================
+
+  Future<void> seleccionarContactosDeAgenda(BuildContext context) async {
+    try {
+      // Solicitar permisos de contactos
+      bool hasPermission = await FlutterContacts.requestPermission();
+      
+      if (!hasPermission) {
+        _mostrarDialogoPermisosContactos(context);
+        return;
+      }
+
+      _isLoading = true;
+      notifyListeners();
+
+      List<Contact> contacts = await FlutterContacts.getContacts(
+        withProperties: true,
+      );
+      
+      List<Contacto> contactosDisponibles = [];
+      for (var contact in contacts) {
+        if (contact.phones.isNotEmpty) {
+          String telefono = contact.phones.first.number;
+          bool yaAgregado = _contactos.any((c) => 
+            c.telefono.replaceAll(RegExp(r'[^0-9]'), '') == 
+            telefono.replaceAll(RegExp(r'[^0-9]'), '')
+          );
+          
+          if (!yaAgregado) {
+            contactosDisponibles.add(Contacto(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              nombre: contact.displayName ?? 'Sin nombre',
+              telefono: telefono,
+              esEmergencia: false,
+            ));
+          }
+        }
+      }
+
+      _isLoading = false;
+      notifyListeners();
+
+      if (contactosDisponibles.isEmpty) {
+        _mostrarError(context, 'No hay contactos disponibles para agregar');
+        return;
+      }
+
+      _mostrarDialogoSeleccionContactos(context, contactosDisponibles);
+
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      _mostrarError(context, 'Error al cargar contactos: $e');
+    }
+  }
+
+  void _mostrarDialogoPermisosContactos(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.contacts, color: Colors.blue, size: 30),
+            SizedBox(width: 10),
+            Text('Permisos de contactos'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Para seleccionar contactos de tu agenda, necesitas dar permisos a la app.',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Text(
+              '📌 Ve a Configuración → Aplicaciones → Emergencia → Permisos',
+              style: TextStyle(fontSize: 14, color: Colors.blue),
+            ),
+            SizedBox(height: 8),
+            Text(
+              '📌 Activa el permiso de "Contactos"',
+              style: TextStyle(fontSize: 14, color: Colors.blue),
+            ),
+            SizedBox(height: 8),
+            Text(
+              '📌 Luego vuelve a la app y presiona "Reintentar"',
+              style: TextStyle(fontSize: 14, color: Colors.blue),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _abrirConfiguracionApp(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Ir a Configuración'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _abrirConfiguracionApp(BuildContext context) async {
+    try {
+      final intent = AndroidIntent(
+        action: 'android.settings.APPLICATION_DETAILS_SETTINGS',
+        data: 'package:com.emergencia.app_emergencia_panico',
+      );
+      await intent.launch();
+    } catch (e) {
+      _mostrarError(context, 'Ve a Configuración → Aplicaciones → Emergencia → Permisos');
+    }
+  }
+
+  void _mostrarDialogoSeleccionContactos(BuildContext context, List<Contacto> contactosDisponibles) {
+    List<Contacto> seleccionados = [];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Seleccionar contactos de emergencia'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Selecciona los contactos que quieres agregar:',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: contactosDisponibles.length,
+                      itemBuilder: (context, index) {
+                        final contacto = contactosDisponibles[index];
+                        final isSelected = seleccionados.contains(contacto);
+                        return CheckboxListTile(
+                          title: Text(contacto.nombre),
+                          subtitle: Text(contacto.telefono),
+                          value: isSelected,
+                          onChanged: (value) {
+                            setState(() {
+                              if (value == true) {
+                                seleccionados.add(contacto);
+                              } else {
+                                seleccionados.remove(contacto);
+                              }
+                            });
+                          },
+                          controlAffinity: ListTileControlAffinity.leading,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  for (var contacto in seleccionados) {
+                    _contactos.add(Contacto(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      nombre: contacto.nombre,
+                      telefono: contacto.telefono,
+                      esEmergencia: true,
+                    ));
+                  }
+                  guardarContactos();
+                  Navigator.pop(context);
+                  _mostrarExito(context, false, seleccionados.length);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text('Agregar ${seleccionados.length} contactos'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ============================================================
+  // ESTADO DEL USUARIO
+  // ============================================================
+
   void cambiarEstado(String nuevoEstado) {
     _estadoUsuario = nuevoEstado;
     _guardarEstado();
@@ -128,7 +344,7 @@ class EmergenciaProvider extends ChangeNotifier {
   }
 
   // ============================================================
-  // PERMISOS Y UBICACIÓN - VERSIÓN MEJORADA
+  // PERMISOS Y UBICACIÓN
   // ============================================================
 
   Future<void> _verificarPermisos() async {
@@ -136,18 +352,16 @@ class EmergenciaProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Verificar si el servicio de ubicación está activado
       bool serviceEnabled = await _location.serviceEnabled();
       if (!serviceEnabled) {
         _gpsActivado = false;
-        _mensaje = '⚠️ Activa el GPS en tu dispositivo';
+        _mensaje = '🔴 Activa el GPS para enviar tu ubicación';
         _isLoading = false;
         notifyListeners();
         
-        // Intentar activar el GPS automáticamente
         serviceEnabled = await _location.requestService();
         if (!serviceEnabled) {
-          _mensaje = '⚠️ Activa el GPS manualmente en Configuración';
+          _mensaje = '🔴 Activa el GPS manualmente en Configuración';
           _isLoading = false;
           notifyListeners();
           return;
@@ -156,12 +370,11 @@ class EmergenciaProvider extends ChangeNotifier {
       
       _gpsActivado = true;
 
-      // Verificar permisos
       PermissionStatus permissionGranted = await _location.hasPermission();
       if (permissionGranted == PermissionStatus.denied) {
         permissionGranted = await _location.requestPermission();
         if (permissionGranted != PermissionStatus.granted) {
-          _mensaje = '⚠️ Permisos de ubicación denegados';
+          _mensaje = '🔴 Permite el acceso a la ubicación';
           _isLoading = false;
           notifyListeners();
           return;
@@ -169,11 +382,11 @@ class EmergenciaProvider extends ChangeNotifier {
       }
       
       _hasPermission = true;
-      _mensaje = '✅ Permisos concedidos - GPS activo';
+      _mensaje = '✅ GPS activo - Listo para emergencias';
       await _obtenerUbicacion();
       
     } catch (e) {
-      _mensaje = '❌ Error: $e';
+      _mensaje = '🔴 Activa el GPS y concede permisos';
       _gpsActivado = false;
     }
 
@@ -187,10 +400,63 @@ class EmergenciaProvider extends ChangeNotifier {
       _mensaje = '📍 Ubicación obtenida correctamente';
       _gpsActivado = true;
     } catch (e) {
-      _mensaje = '⚠️ No se pudo obtener ubicación: $e';
+      _mensaje = '🔴 No se pudo obtener ubicación. Activa el GPS.';
       _gpsActivado = false;
     }
     notifyListeners();
+  }
+
+  void _mostrarDialogoGPS(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.gps_off, color: Colors.red, size: 30),
+            SizedBox(width: 10),
+            Text('GPS desactivado'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Para enviar tu ubicación en caso de emergencia, necesitas activar el GPS.',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Text(
+              '📌 Actívalo desde Configuración → Ubicación',
+              style: TextStyle(fontSize: 14, color: Colors.blue),
+            ),
+            SizedBox(height: 8),
+            Text(
+              '📌 O desliza hacia abajo y toca el ícono de Ubicación',
+              style: TextStyle(fontSize: 14, color: Colors.blue),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _verificarPermisos();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Reintentar'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ============================================================
@@ -201,7 +467,7 @@ class EmergenciaProvider extends ChangeNotifier {
     if (!_gpsActivado || !_hasPermission) {
       await _verificarPermisos();
       if (!_gpsActivado || !_hasPermission) {
-        _mostrarError(context, 'Activa el GPS y concede permisos');
+        _mostrarDialogoGPS(context);
         return;
       }
     }
@@ -236,7 +502,6 @@ class EmergenciaProvider extends ChangeNotifier {
             telefono = telefono.substring(1);
           }
           
-          // SMS
           try {
             await _enviarSMS(telefono, mensaje);
             enviados++;
@@ -244,7 +509,6 @@ class EmergenciaProvider extends ChangeNotifier {
             print('Error SMS a ${contacto.nombre}: $e');
           }
 
-          // WhatsApp
           try {
             await _enviarWhatsApp(telefono, mensaje);
             enviados++;
@@ -381,7 +645,7 @@ class MyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => EmergenciaProvider(),
       child: MaterialApp(
-        title: 'Botón de Pánico',
+        title: 'Emergencia',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
             seedColor: Colors.red,
@@ -427,7 +691,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🚨 Botón de Pánico'),
+        title: const Text('🚨 Emergencia'),
         backgroundColor: Colors.red,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -545,7 +809,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       bgColor = Colors.orange.shade50;
       textColor = Colors.orange.shade800;
       icon = Icons.gps_off;
-      mensaje = '⚠️ Activa el GPS para enviar ubicación';
+      mensaje = '🔴 Activa el GPS para enviar tu ubicación';
+    } else if (!provider.hasPermission) {
+      bgColor = Colors.orange.shade50;
+      textColor = Colors.orange.shade800;
+      icon = Icons.location_off;
+      mensaje = '🔴 Permite el acceso a la ubicación';
     } else {
       bgColor = Colors.red.shade50;
       textColor = Colors.red.shade800;
@@ -568,7 +837,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Expanded(
             child: Text(
               mensaje,
-              style: TextStyle(color: textColor, fontSize: 13),
+              style: TextStyle(
+                color: textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],
@@ -704,6 +977,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       Vibration.vibrate(duration: 200);
     }
     
+    if (!provider.gpsActivado || !provider.hasPermission) {
+      await provider._verificarPermisos();
+      if (!provider.gpsActivado || !provider.hasPermission) {
+        provider._mostrarDialogoGPS(context);
+        return;
+      }
+    }
+    
     final titulo = esPrueba ? '🧪 Enviar mensaje de prueba' : '🚨 Confirmar emergencia';
     final mensaje = esPrueba
         ? '¿Enviar mensaje de prueba a tus contactos?'
@@ -798,8 +1079,21 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
               ),
             ),
             const Divider(),
+            
+            ElevatedButton.icon(
+              onPressed: () => provider.seleccionarContactosDeAgenda(context),
+              icon: const Icon(Icons.contacts, color: Colors.white),
+              label: const Text('📞 Seleccionar de la agenda'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 45),
+              ),
+            ),
+            
+            const SizedBox(height: 16),
             const Text(
-              'Agregar contacto:',
+              'O agregar manualmente:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
@@ -849,6 +1143,11 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
             const Text(
               '💡 Ejemplo: 573001234567 (Colombia)',
               style: TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '📌 Los contactos se guardan automáticamente',
+              style: TextStyle(fontSize: 11, color: Colors.green),
             ),
           ],
         ),
