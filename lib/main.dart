@@ -4,6 +4,7 @@ import 'package:location/location.dart';
 import 'package:vibration/vibration.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 
 // ============================================================
 // MODELO DE CONTACTO
@@ -52,6 +53,7 @@ class EmergenciaProvider extends ChangeNotifier {
   LocationData? _ubicacion;
   List<Contacto> _contactos = [];
   String _estadoUsuario = 'Estoy bien';
+  String _ultimoMensaje = '';
 
   bool get isLoading => _isLoading;
   bool get hasPermission => _hasPermission;
@@ -59,6 +61,7 @@ class EmergenciaProvider extends ChangeNotifier {
   LocationData? get ubicacion => _ubicacion;
   List<Contacto> get contactos => _contactos;
   String get estadoUsuario => _estadoUsuario;
+  String get ultimoMensaje => _ultimoMensaje;
 
   final Location _location = Location();
 
@@ -200,18 +203,41 @@ class EmergenciaProvider extends ChangeNotifier {
           ? _construirMensajePrueba()
           : _construirMensajeEmergencia();
 
+      _ultimoMensaje = mensaje;
+
+      // Enviar a cada contacto
       int enviados = 0;
       for (var contacto in _contactos) {
         try {
+          // Limpiar el número de teléfono
+          String telefono = contacto.telefono.replaceAll(RegExp(r'[^0-9]'), '');
+          if (telefono.startsWith('0')) {
+            telefono = telefono.substring(1);
+          }
+          
+          // Intentar abrir WhatsApp con el mensaje pre-cargado
           final whatsappUrl = Uri.parse(
-            'https://wa.me/${contacto.telefono}?text=${Uri.encodeComponent(mensaje)}'
+            'https://api.whatsapp.com/send?phone=$telefono&text=${Uri.encodeComponent(mensaje)}'
           );
+          
           if (await canLaunchUrl(whatsappUrl)) {
             await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
             enviados++;
+            
+            // Esperar un momento entre contactos
+            await Future.delayed(const Duration(seconds: 2));
+          } else {
+            // Si WhatsApp no funciona, intentar SMS
+            final smsUrl = Uri.parse(
+              'sms:$telefono?body=${Uri.encodeComponent(mensaje)}'
+            );
+            if (await canLaunchUrl(smsUrl)) {
+              await launchUrl(smsUrl, mode: LaunchMode.externalApplication);
+              enviados++;
+            }
           }
         } catch (e) {
-          print('Error WhatsApp a ${contacto.telefono}: $e');
+          print('Error enviando a ${contacto.nombre}: $e');
         }
       }
 
@@ -219,7 +245,7 @@ class EmergenciaProvider extends ChangeNotifier {
           ? '✅ Mensaje de prueba enviado a $enviados contactos'
           : '✅ ¡Alerta enviada a $enviados contactos!';
       
-      _mostrarExito(context, esPrueba);
+      _mostrarExito(context, esPrueba, enviados);
 
     } catch (e) {
       _mensaje = '❌ Error al enviar: $e';
@@ -233,7 +259,9 @@ class EmergenciaProvider extends ChangeNotifier {
   String _construirMensajeEmergencia() {
     return '''
 🚨 ¡ALERTA DE EMERGENCIA! 
+
 👤 Estado: $_estadoUsuario
+
 📍 Mi ubicación: 
 https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
 
@@ -245,7 +273,9 @@ https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
   String _construirMensajePrueba() {
     return '''
 🧪 MENSAJE DE PRUEBA - APP DE EMERGENCIA
+
 ✅ Estoy probando mi app de emergencia, todo bien
+
 📍 Mi ubicación: 
 https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
 
@@ -253,13 +283,13 @@ https://www.google.com/maps?q=${_ubicacion!.latitude},${_ubicacion!.longitude}
 ''';
   }
 
-  void _mostrarExito(BuildContext context, bool esPrueba) {
+  void _mostrarExito(BuildContext context, bool esPrueba, int enviados) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           esPrueba 
-            ? '🧪 Mensaje de prueba enviado exitosamente'
-            : '🚨 ¡ALERTA ENVIADA! Tus contactos han sido notificados'
+            ? '🧪 Mensaje de prueba enviado a $enviados contactos'
+            : '🚨 ¡ALERTA ENVIADA! $enviados contactos notificados'
         ),
         backgroundColor: esPrueba ? Colors.blue : Colors.green,
         duration: const Duration(seconds: 4),
@@ -748,6 +778,11 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
             const Text(
               '💡 Ejemplo: 573001234567 (Colombia)',
               style: TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '📌 El mensaje se abre en WhatsApp, debes presionar "Enviar"',
+              style: TextStyle(fontSize: 11, color: Colors.orange),
             ),
           ],
         ),
