@@ -4,7 +4,7 @@ import 'package:location/location.dart';
 import 'package:vibration/vibration.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/services.dart';
+import 'package:android_intent_plus/android_intent.dart';
 
 // ============================================================
 // MODELO DE CONTACTO
@@ -49,6 +49,7 @@ class Contacto {
 class EmergenciaProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _hasPermission = false;
+  bool _gpsActivado = false;
   String _mensaje = 'Presiona el botón en caso de emergencia';
   LocationData? _ubicacion;
   List<Contacto> _contactos = [];
@@ -57,6 +58,7 @@ class EmergenciaProvider extends ChangeNotifier {
 
   bool get isLoading => _isLoading;
   bool get hasPermission => _hasPermission;
+  bool get gpsActivado => _gpsActivado;
   String get mensaje => _mensaje;
   LocationData? get ubicacion => _ubicacion;
   List<Contacto> get contactos => _contactos;
@@ -125,22 +127,36 @@ class EmergenciaProvider extends ChangeNotifier {
     await prefs.setString('estadoUsuario', _estadoUsuario);
   }
 
+  // ============================================================
+  // PERMISOS Y UBICACIÓN - VERSIÓN MEJORADA
+  // ============================================================
+
   Future<void> _verificarPermisos() async {
     _isLoading = true;
     notifyListeners();
 
     try {
+      // Verificar si el servicio de ubicación está activado
       bool serviceEnabled = await _location.serviceEnabled();
       if (!serviceEnabled) {
+        _gpsActivado = false;
+        _mensaje = '⚠️ Activa el GPS en tu dispositivo';
+        _isLoading = false;
+        notifyListeners();
+        
+        // Intentar activar el GPS automáticamente
         serviceEnabled = await _location.requestService();
         if (!serviceEnabled) {
-          _mensaje = '⚠️ Servicio de ubicación no disponible';
+          _mensaje = '⚠️ Activa el GPS manualmente en Configuración';
           _isLoading = false;
           notifyListeners();
           return;
         }
       }
+      
+      _gpsActivado = true;
 
+      // Verificar permisos
       PermissionStatus permissionGranted = await _location.hasPermission();
       if (permissionGranted == PermissionStatus.denied) {
         permissionGranted = await _location.requestPermission();
@@ -153,11 +169,12 @@ class EmergenciaProvider extends ChangeNotifier {
       }
       
       _hasPermission = true;
-      _mensaje = '✅ Permisos concedidos - Listo para emergencias';
+      _mensaje = '✅ Permisos concedidos - GPS activo';
       await _obtenerUbicacion();
       
     } catch (e) {
-      _mensaje = '❌ Error al verificar permisos: $e';
+      _mensaje = '❌ Error: $e';
+      _gpsActivado = false;
     }
 
     _isLoading = false;
@@ -168,17 +185,23 @@ class EmergenciaProvider extends ChangeNotifier {
     try {
       _ubicacion = await _location.getLocation();
       _mensaje = '📍 Ubicación obtenida correctamente';
+      _gpsActivado = true;
     } catch (e) {
       _mensaje = '⚠️ No se pudo obtener ubicación: $e';
+      _gpsActivado = false;
     }
     notifyListeners();
   }
 
+  // ============================================================
+  // ENVÍO DE MENSAJES
+  // ============================================================
+
   Future<void> enviarEmergencia(BuildContext context, {bool esPrueba = false}) async {
-    if (!_hasPermission) {
+    if (!_gpsActivado || !_hasPermission) {
       await _verificarPermisos();
-      if (!_hasPermission) {
-        _mostrarError(context, 'Permisos necesarios para enviar alerta');
+      if (!_gpsActivado || !_hasPermission) {
+        _mostrarError(context, 'Activa el GPS y concede permisos');
         return;
       }
     }
@@ -205,37 +228,30 @@ class EmergenciaProvider extends ChangeNotifier {
 
       _ultimoMensaje = mensaje;
 
-      // Enviar a cada contacto
       int enviados = 0;
       for (var contacto in _contactos) {
         try {
-          // Limpiar el número de teléfono
           String telefono = contacto.telefono.replaceAll(RegExp(r'[^0-9]'), '');
           if (telefono.startsWith('0')) {
             telefono = telefono.substring(1);
           }
           
-          // Intentar abrir WhatsApp con el mensaje pre-cargado
-          final whatsappUrl = Uri.parse(
-            'https://api.whatsapp.com/send?phone=$telefono&text=${Uri.encodeComponent(mensaje)}'
-          );
-          
-          if (await canLaunchUrl(whatsappUrl)) {
-            await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+          // SMS
+          try {
+            await _enviarSMS(telefono, mensaje);
             enviados++;
-            
-            // Esperar un momento entre contactos
-            await Future.delayed(const Duration(seconds: 2));
-          } else {
-            // Si WhatsApp no funciona, intentar SMS
-            final smsUrl = Uri.parse(
-              'sms:$telefono?body=${Uri.encodeComponent(mensaje)}'
-            );
-            if (await canLaunchUrl(smsUrl)) {
-              await launchUrl(smsUrl, mode: LaunchMode.externalApplication);
-              enviados++;
-            }
+          } catch (e) {
+            print('Error SMS a ${contacto.nombre}: $e');
           }
+
+          // WhatsApp
+          try {
+            await _enviarWhatsApp(telefono, mensaje);
+            enviados++;
+          } catch (e) {
+            print('Error WhatsApp a ${contacto.nombre}: $e');
+          }
+
         } catch (e) {
           print('Error enviando a ${contacto.nombre}: $e');
         }
@@ -254,6 +270,47 @@ class EmergenciaProvider extends ChangeNotifier {
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  Future<void> _enviarSMS(String telefono, String mensaje) async {
+    final smsUrl = Uri.parse(
+      'sms:$telefono?body=${Uri.encodeComponent(mensaje)}'
+    );
+    
+    if (await canLaunchUrl(smsUrl)) {
+      await launchUrl(smsUrl, mode: LaunchMode.externalApplication);
+      return;
+    }
+    
+    throw Exception('No se puede enviar SMS');
+  }
+
+  Future<void> _enviarWhatsApp(String telefono, String mensaje) async {
+    try {
+      final intent = AndroidIntent(
+        action: 'android.intent.action.VIEW',
+        data: 'https://api.whatsapp.com/send?phone=$telefono&text=${Uri.encodeComponent(mensaje)}',
+        package: 'com.whatsapp',
+      );
+      await intent.launch();
+      return;
+    } catch (e) {
+      print('Error con AndroidIntent: $e');
+    }
+
+    try {
+      final whatsappUrl = Uri.parse(
+        'https://api.whatsapp.com/send?phone=$telefono&text=${Uri.encodeComponent(mensaje)}'
+      );
+      if (await canLaunchUrl(whatsappUrl)) {
+        await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (e) {
+      print('Error con url_launcher: $e');
+    }
+    
+    throw Exception('No se puede enviar WhatsApp');
   }
 
   String _construirMensajeEmergencia() {
@@ -474,30 +531,44 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildStatusCard(EmergenciaProvider provider) {
+    Color bgColor;
+    Color textColor;
+    IconData icon;
+    String mensaje;
+    
+    if (provider.hasPermission && provider.gpsActivado) {
+      bgColor = Colors.green.shade50;
+      textColor = Colors.green.shade800;
+      icon = Icons.check_circle;
+      mensaje = provider.mensaje;
+    } else if (!provider.gpsActivado) {
+      bgColor = Colors.orange.shade50;
+      textColor = Colors.orange.shade800;
+      icon = Icons.gps_off;
+      mensaje = '⚠️ Activa el GPS para enviar ubicación';
+    } else {
+      bgColor = Colors.red.shade50;
+      textColor = Colors.red.shade800;
+      icon = Icons.warning;
+      mensaje = provider.mensaje;
+    }
+    
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: provider.hasPermission ? Colors.green.shade50 : Colors.orange.shade50,
+        color: bgColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: provider.hasPermission ? Colors.green.shade300 : Colors.orange.shade300,
-        ),
+        border: Border.all(color: textColor.withOpacity(0.3)),
       ),
       child: Row(
         children: [
-          Icon(
-            provider.hasPermission ? Icons.check_circle : Icons.warning,
-            color: provider.hasPermission ? Colors.green : Colors.orange,
-          ),
+          Icon(icon, color: textColor),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              provider.mensaje,
-              style: TextStyle(
-                color: provider.hasPermission ? Colors.green.shade800 : Colors.orange.shade800,
-                fontSize: 13,
-              ),
+              mensaje,
+              style: TextStyle(color: textColor, fontSize: 13),
             ),
           ),
         ],
@@ -778,11 +849,6 @@ class _ConfiguracionDialogState extends State<ConfiguracionDialog> {
             const Text(
               '💡 Ejemplo: 573001234567 (Colombia)',
               style: TextStyle(fontSize: 10, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '📌 El mensaje se abre en WhatsApp, debes presionar "Enviar"',
-              style: TextStyle(fontSize: 11, color: Colors.orange),
             ),
           ],
         ),
