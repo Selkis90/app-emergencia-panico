@@ -5,8 +5,17 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+// Firma para Play Store: si existe android/key.properties se usa tu propia
+// llave (keystore). Si no existe, se firma con la llave de depuración para
+// poder instalar la APK en tu celular. Ver README → "Firmar para Play Store".
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
 android {
-    namespace = "com.emergencia.app_emergencia_panico"
+    namespace = "com.selkis90.alertaya"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,18 +25,27 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.emergencia.app_emergencia_panico"
+        applicationId = "com.selkis90.alertaya"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            release {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Firma de depuración para que `flutter build apk --release` funcione.
-            // Para publicar en Play Store crea tu propia firma (keystore).
-            signingConfig = signingConfigs.debug
+            signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

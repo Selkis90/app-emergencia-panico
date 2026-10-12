@@ -4,14 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/emergencia_provider.dart';
+import '../providers/premium_provider.dart';
+import '../providers/proteccion_provider.dart';
 import '../services/nativo.dart';
 import '../services/ubicacion.dart';
 import '../utils/mensajes.dart';
 import '../widgets/boton_sos.dart';
 import '../widgets/cuenta_regresiva.dart';
+import '../widgets/llegue_bien.dart';
 import 'ajustes_screen.dart';
 import 'contactos_screen.dart';
 import 'envio_screen.dart';
+import 'premium_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -106,12 +110,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final p = context.watch<EmergenciaProvider>();
+    final prot = context.watch<ProteccionProvider>();
+    final esPremium = context.watch<PremiumProvider>().esPremium;
     final linea = p.ajustes.numeroEmergencias.trim();
+    final avisoAutomatico = prot.ultimaAlertaAutomatica;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Botón de Pánico', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('AlertaYa', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5)),
         actions: [
+          IconButton(
+            tooltip: 'Premium',
+            icon: Icon(
+              esPremium ? Icons.workspace_premium : Icons.workspace_premium_outlined,
+              color: esPremium ? Colors.amber.shade300 : Colors.white,
+            ),
+            onPressed: () => _abrir(const PremiumScreen()),
+          ),
           IconButton(
             tooltip: 'Contactos',
             icon: const Icon(Icons.contacts),
@@ -137,6 +152,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          if (avisoAutomatico != null)
+                            Card(
+                              color: Colors.orange.shade50,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: const Icon(Icons.alarm, color: Colors.deepOrange),
+                                title: Text(avisoAutomatico),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.close),
+                                  onPressed: prot.limpiarAvisoAutomatico,
+                                ),
+                              ),
+                            ),
+                          if (prot.seguimientoActivo)
+                            Card(
+                              color: Colors.blue.shade50,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: const Icon(Icons.share_location, color: Colors.blue),
+                                title: const Text('Ubicación en vivo activa'),
+                                subtitle: Text(prot.resultadoSeguimiento ??
+                                    'Se envía por SMS cada ${p.ajustes.intervaloSeguimientoMin} min.'),
+                                trailing: TextButton(
+                                  onPressed: prot.detenerSeguimiento,
+                                  child: const Text('Detener'),
+                                ),
+                              ),
+                            ),
+                          if (prot.sirenaActiva || prot.linternaActiva)
+                            Card(
+                              color: Colors.red.shade50,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: const Icon(Icons.campaign, color: Colors.red),
+                                title: Text(
+                                  prot.sirenaActiva && prot.linternaActiva
+                                      ? 'Sirena y linterna encendidas'
+                                      : (prot.sirenaActiva ? 'Sirena encendida' : 'Linterna S.O.S. encendida'),
+                                ),
+                                trailing: TextButton(
+                                  onPressed: () {
+                                    prot.ponerSirena(false);
+                                    prot.ponerLinterna(false);
+                                  },
+                                  child: const Text('Apagar'),
+                                ),
+                              ),
+                            ),
                           _Estado(provider: p, onContactos: () => _abrir(const ContactosScreen())),
                           const SizedBox(height: 8),
                           BotonSos(
@@ -183,6 +246,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 12),
+                          const TarjetaLlegueBien(),
+                          const SizedBox(height: 10),
+                          Text(
+                            'AlertaYa no reemplaza a la línea de emergencias'
+                            '${linea.isEmpty ? '' : ' $linea'}. Ante un peligro inmediato, llama.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                           ),
                         ],
                       ),

@@ -5,9 +5,12 @@ import 'package:provider/provider.dart';
 
 import '../models/contacto.dart';
 import '../providers/emergencia_provider.dart';
+import '../providers/premium_provider.dart';
+import '../providers/proteccion_provider.dart';
 import '../services/nativo.dart';
 import '../services/ubicacion.dart';
 import '../utils/mensajes.dart';
+import 'premium_screen.dart';
 
 enum _EstadoSms { pendiente, enviando, enviado, sinPermiso, noDisponible, desactivado, sinContactos }
 
@@ -66,8 +69,20 @@ class _EnvioScreenState extends State<EnvioScreen> with WidgetsBindingObserver {
 
   Future<void> _ejecutar() async {
     final p = _p;
+    final prot = context.read<ProteccionProvider>();
+    final esPremium = context.read<PremiumProvider>().esPremium;
+
+    if (widget.tipo == TipoAlerta.aSalvo) {
+      // "Estoy a salvo": se apaga todo lo que siga activo.
+      await prot.apagarTodo();
+      if (prot.temporizadorActivo) await prot.llegueBien();
+      if (!mounted) return;
+    }
     if (_esEmergencia && p.ajustes.vibracionSos) {
       Nativo.vibrarSos(repeticiones: 2);
+    }
+    if (_esEmergencia && esPremium && p.ajustes.sirenaAutomatica) {
+      prot.ponerSirena(true);
     }
 
     final instalado = await Nativo.whatsappInstalado();
@@ -80,6 +95,10 @@ class _EnvioScreenState extends State<EnvioScreen> with WidgetsBindingObserver {
 
     await _enviarSmsAutomatico();
     if (!mounted) return;
+
+    if (_esEmergencia && esPremium && p.ajustes.seguimientoAutomatico) {
+      prot.iniciarSeguimiento();
+    }
 
     if (p.ajustes.usarWhatsApp && _continuo && p.contactosWhatsApp.isNotEmpty) {
       _temporizador = Timer(const Duration(milliseconds: 900), _abrirSiguienteWhatsApp);
@@ -248,6 +267,7 @@ class _EnvioScreenState extends State<EnvioScreen> with WidgetsBindingObserver {
                 _tarjetaSms(p),
                 if (p.ajustes.usarWhatsApp) _tarjetaWhatsApp(p),
                 if (_esEmergencia) _tarjetaLlamadas(p),
+                if (_esEmergencia) _tarjetaPremium(p),
                 _vistaPrevia(),
                 const SizedBox(height: 12),
                 if (_esEmergencia)
@@ -509,6 +529,73 @@ class _EnvioScreenState extends State<EnvioScreen> with WidgetsBindingObserver {
               icon: const Icon(Icons.person),
               label: Text('Llamar a ${principal.nombre}'),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tarjetaPremium(EmergenciaProvider p) {
+    final prot = context.watch<ProteccionProvider>();
+    final esPremium = context.watch<PremiumProvider>().esPremium;
+
+    Future<void> conPremium(Future<void> Function() accion) async {
+      if (!esPremium) {
+        await abrirPremium(context);
+        return;
+      }
+      await accion();
+    }
+
+    return _Seccion(
+      icono: Icons.workspace_premium,
+      titulo: 'Protección Premium',
+      trailing: esPremium
+          ? null
+          : Icon(Icons.lock_outline, color: Colors.amber.shade800, size: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.share_location),
+            title: const Text('Ubicación en vivo'),
+            subtitle: Text(
+              prot.seguimientoActivo
+                  ? (prot.resultadoSeguimiento ??
+                      'Se enviará por SMS cada ${p.ajustes.intervaloSeguimientoMin} min.')
+                  : 'Reenvía tu ubicación por SMS cada ${p.ajustes.intervaloSeguimientoMin} min.',
+            ),
+            value: prot.seguimientoActivo,
+            onChanged: (v) => conPremium(() async {
+              if (v) {
+                prot.iniciarSeguimiento();
+              } else {
+                prot.detenerSeguimiento();
+              }
+            }),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () => conPremium(() async {
+                  final ok = await prot.ponerSirena(!prot.sirenaActiva);
+                  if (!ok && mounted) _aviso('No se pudo activar la sirena en este celular');
+                }),
+                icon: Icon(prot.sirenaActiva ? Icons.volume_off : Icons.campaign),
+                label: Text(prot.sirenaActiva ? 'Apagar sirena' : 'Sirena'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => conPremium(() async {
+                  final ok = await prot.ponerLinterna(!prot.linternaActiva);
+                  if (!ok && mounted) _aviso('Este celular no tiene linterna disponible');
+                }),
+                icon: Icon(prot.linternaActiva ? Icons.flashlight_off : Icons.flashlight_on),
+                label: Text(prot.linternaActiva ? 'Apagar linterna' : 'Linterna S.O.S.'),
+              ),
+            ],
+          ),
         ],
       ),
     );

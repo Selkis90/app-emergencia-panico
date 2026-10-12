@@ -1,11 +1,11 @@
 {
-    "name": "app_emergencia_panico",
-    "short_name": "app_emergencia_panico",
+    "name": "AlertaYa",
+    "short_name": "AlertaYa",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#D32F2F",
+    "theme_color": "#D32F2F",
+    "description": "Botón de pánico: alerta SOS con ubicación por SMS y WhatsApp",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

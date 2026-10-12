@@ -58,6 +58,7 @@ class ConstructorMensajes {
     required Ajustes ajustes,
     DatosUbicacion? ubicacion,
     DateTime? ahora,
+    String? motivo,
   }) {
     final fecha = ahora ?? DateTime.now();
     final nombre =
@@ -66,7 +67,7 @@ class ConstructorMensajes {
 
     switch (tipo) {
       case TipoAlerta.emergencia:
-        return _emergencia(nombre, linea, ajustes, ubicacion, fecha);
+        return _emergencia(nombre, linea, ajustes, ubicacion, fecha, motivo);
       case TipoAlerta.prueba:
         return _prueba(nombre, ubicacion, fecha);
       case TipoAlerta.aSalvo:
@@ -80,6 +81,7 @@ class ConstructorMensajes {
     Ajustes ajustes,
     DatosUbicacion? u,
     DateTime fecha,
+    String? motivo,
   ) {
     final personal = ajustes.mensajePersonalizado.trim().isEmpty
         ? 'Estoy en peligro, por favor ayúdame.'
@@ -89,7 +91,11 @@ class ConstructorMensajes {
     final w = StringBuffer()
       ..writeln('🆘🆘🆘 *S.O.S. — EMERGENCIA* 🆘🆘🆘')
       ..writeln()
-      ..writeln('*$nombre necesita ayuda URGENTE.*')
+      ..writeln('*$nombre necesita ayuda URGENTE.*');
+    if (motivo != null && motivo.trim().isNotEmpty) {
+      w.writeln('⏰ ${motivo.trim()}');
+    }
+    w
       ..writeln('💬 $personal')
       ..writeln();
     if (u != null) {
@@ -115,7 +121,9 @@ class ConstructorMensajes {
     }
     w.write('_Enviado con mi botón de pánico_');
 
-    final s = StringBuffer('SOS EMERGENCIA! $nombre necesita ayuda URGENTE. $personal');
+    final s = StringBuffer('SOS EMERGENCIA! $nombre necesita ayuda URGENTE.');
+    if (motivo != null && motivo.trim().isNotEmpty) s.write(' ${motivo.trim()}.');
+    s.write(' $personal');
     if (u != null) {
       s.write(' Ubicacion: ${u.enlaceMaps}');
       if (u.precisionMetros != null) s.write(' (+-${u.precisionMetros!.round()}m)');
@@ -159,6 +167,30 @@ class ConstructorMensajes {
       'TRANQUILO: $nombre YA ESTA A SALVO. La alerta anterior queda cancelada. Gracias.',
     );
     return MensajeAlerta(whatsapp: w.toString(), sms: textoSms(s.toString()));
+  }
+
+  /// Mensaje corto de "ubicación en vivo" (Premium), se reenvía cada pocos
+  /// minutos mientras la alerta siga activa.
+  static MensajeAlerta actualizacion({
+    required Ajustes ajustes,
+    required DatosUbicacion ubicacion,
+    required int numero,
+    DateTime? ahora,
+  }) {
+    final fecha = ahora ?? DateTime.now();
+    final nombre =
+        ajustes.nombreUsuario.trim().isEmpty ? 'Tu contacto' : ajustes.nombreUsuario.trim();
+    final w = StringBuffer()
+      ..writeln('📍 *Ubicación en vivo #$numero* — S.O.S. de $nombre sigue activo')
+      ..writeln(ubicacion.enlaceMaps);
+    if (ubicacion.precisionMetros != null) {
+      w.writeln('🎯 ±${ubicacion.precisionMetros!.round()} m');
+    }
+    w.write('🕒 ${fechaHora(fecha)}');
+    final s = 'SOS ACTIVO $nombre - ubicacion #$numero: ${ubicacion.enlaceMaps}'
+        '${ubicacion.precisionMetros != null ? ' (+-${ubicacion.precisionMetros!.round()}m)' : ''}'
+        ' ${fechaHora(fecha)}';
+    return MensajeAlerta(whatsapp: w.toString(), sms: textoSms(s));
   }
 
   /// Caracteres del alfabeto GSM-7 (SMS de 160 caracteres por parte).

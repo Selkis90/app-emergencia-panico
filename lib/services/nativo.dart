@@ -38,7 +38,7 @@ class ResultadoSms {
 class Nativo {
   Nativo._();
 
-  static const _canal = MethodChannel('emergencia/nativo');
+  static const _canal = MethodChannel('alertaya/nativo');
 
   static bool get esAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -182,6 +182,16 @@ class Nativo {
   static Future<void> detenerVibracion() async {
     await _invocar<bool>('detenerVibracion');
   }
+
+  // ---------------- Premium: sirena y linterna ----------------
+
+  /// Activa o apaga la sirena (tono de emergencia a todo volumen).
+  static Future<bool> sirena(bool activar) async =>
+      (await _invocar<bool>('sirena', {'activar': activar})) ?? false;
+
+  /// Activa o apaga la linterna parpadeando en S.O.S.
+  static Future<bool> linterna(bool activar) async =>
+      (await _invocar<bool>('linterna', {'activar': activar})) ?? false;
 
   // ---------------- Respaldo ----------------
 

@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:emergencia/models/ajustes.dart';
-import 'package:emergencia/models/contacto.dart';
-import 'package:emergencia/utils/mensajes.dart';
-import 'package:emergencia/utils/telefono.dart';
+import 'package:alertaya/models/ajustes.dart';
+import 'package:alertaya/models/contacto.dart';
+import 'package:alertaya/utils/mensajes.dart';
+import 'package:alertaya/utils/telefono.dart';
 
 void main() {
   group('Telefono', () {
@@ -100,6 +100,37 @@ void main() {
       final m = ConstructorMensajes.construir(tipo: TipoAlerta.emergencia, ajustes: ajustes);
       expect(m.whatsapp, contains('no disponible'));
       expect(m.sms, contains('Ubicacion no disponible'));
+    });
+
+    test('el motivo del temporizador aparece en la alerta', () {
+      final m = ConstructorMensajes.construir(
+        tipo: TipoAlerta.emergencia,
+        ajustes: ajustes,
+        ubicacion: u,
+        motivo: 'No confirmó que llegó bien a tiempo',
+      );
+      expect(m.whatsapp, contains('⏰ No confirmó que llegó bien a tiempo'));
+      expect(m.sms, contains('No confirmo que llego bien a tiempo.'));
+    });
+
+    test('mensaje de ubicación en vivo', () {
+      final m = ConstructorMensajes.actualizacion(
+        ajustes: ajustes,
+        ubicacion: u,
+        numero: 3,
+        ahora: DateTime(2026, 10, 8, 22, 46),
+      );
+      expect(m.whatsapp, contains('Ubicación en vivo #3'));
+      expect(m.sms, startsWith('SOS ACTIVO Andrés - ubicacion #3: https://maps.google.com/?q=4.609710,-74.081750'));
+    });
+
+    test('ajustes Premium se guardan y recuperan', () {
+      final a = Ajustes.decodificar(
+        ajustes.copyWith(intervaloSeguimientoMin: 10, sirenaAutomatica: true).codificar(),
+      );
+      expect(a.intervaloSeguimientoMin, 10);
+      expect(a.sirenaAutomatica, isTrue);
+      expect(a.seguimientoAutomatico, isTrue);
     });
 
     test('ajustes se guardan y recuperan', () {

@@ -4,7 +4,6 @@
 .pub/
 build/
 *.iml
-*.lock
 *.log
 *.pid
 *.swp
@@ -65,8 +64,6 @@ lcov.info
 test/.test_coverage.dart
 
 # Package
-*.pid
-*.lock
 
 # macOS
 .DS_Store
@@ -75,3 +72,8 @@ Thumbs.db
 # Linux
 *.tmp
 *.temp
+
+# Firma de Play Store (NUNCA subir a GitHub)
+android/key.properties
+*.jks
+*.keystore

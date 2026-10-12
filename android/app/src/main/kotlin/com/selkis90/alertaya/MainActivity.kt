@@ -1,10 +1,14 @@
-package com.emergencia.app_emergencia_panico
+package com.selkis90.alertaya
 
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -23,7 +27,7 @@ import io.flutter.plugin.common.MethodChannel
 /**
  * Puente nativo (Android) de la app de emergencia.
  *
- * Canal: "emergencia/nativo"
+ * Canal: "alertaya/nativo"
  *  - tienePermiso / pedirPermiso  (contactos, sms, llamada)
  *  - obtenerContactos             (lee la agenda del teléfono)
  *  - enviarSms                    (envía SMS automáticamente, sin abrir otra app)
@@ -31,12 +35,13 @@ import io.flutter.plugin.common.MethodChannel
  *  - whatsappInstalado / abrirChatWhatsApp / compartirWhatsApp
  *  - llamar                       (llamada directa o marcador)
  *  - vibrarSos / detenerVibracion
+ *  - sirena / linterna            (Premium: alarma sonora y linterna en S.O.S.)
  *  - abrirAjustesApp
  */
 class MainActivity : FlutterActivity() {
 
     companion object {
-        private const val CANAL = "emergencia/nativo"
+        private const val CANAL = "alertaya/nativo"
         private const val CODIGO_PERMISO = 7301
         private const val WHATSAPP = "com.whatsapp"
         private const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
@@ -105,6 +110,8 @@ class MainActivity : FlutterActivity() {
                 vibrador()?.cancel()
                 result.success(true)
             }
+            "sirena" -> result.success(sirena(call.argument<Boolean>("activar") ?: false))
+            "linterna" -> result.success(linterna(call.argument<Boolean>("activar") ?: false))
             "abrirAjustesApp" -> {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 intent.data = Uri.parse("package:$packageName")
@@ -371,6 +378,118 @@ class MainActivity : FlutterActivity() {
             @Suppress("DEPRECATION")
             v.vibrate(arreglo, -1)
         }
+    }
+
+
+    // ------------------------------------------------------------------
+    // SIRENA (Premium): tono de emergencia en el canal de ALARMA a todo volumen
+    // ------------------------------------------------------------------
+
+    private var tono: ToneGenerator? = null
+    private var volumenAnterior: Int? = null
+    private val repetirSirena = object : Runnable {
+        override fun run() {
+            val t = tono ?: return
+            t.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 2000)
+            hiloPrincipal.postDelayed(this, 2000)
+        }
+    }
+
+    private fun sirena(activar: Boolean): Boolean {
+        val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (!activar) {
+            hiloPrincipal.removeCallbacks(repetirSirena)
+            tono?.stopTone()
+            tono?.release()
+            tono = null
+            val v = volumenAnterior
+            if (audio != null && v != null) {
+                try { audio.setStreamVolume(AudioManager.STREAM_ALARM, v, 0) } catch (e: Exception) { }
+            }
+            volumenAnterior = null
+            return true
+        }
+        if (tono != null) return true
+        return try {
+            if (audio != null) {
+                volumenAnterior = audio.getStreamVolume(AudioManager.STREAM_ALARM)
+                audio.setStreamVolume(
+                    AudioManager.STREAM_ALARM,
+                    audio.getStreamMaxVolume(AudioManager.STREAM_ALARM),
+                    0
+                )
+            }
+            tono = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
+            hiloPrincipal.post(repetirSirena)
+            true
+        } catch (e: Exception) {
+            tono = null
+            false
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // LINTERNA S.O.S. (Premium): parpadea ··· ——— ··· sin parar
+    // ------------------------------------------------------------------
+
+    private var camaraFlash: String? = null
+    private var pasoLinterna = 0
+    private var linternaActiva = false
+    // Duraciones encendido/apagado en ms: S (···) O (———) S (···) + pausa
+    private val patronLinterna = longArrayOf(
+        200, 200, 200, 200, 200, 600,
+        600, 200, 600, 200, 600, 600,
+        200, 200, 200, 200, 200, 1400
+    )
+
+    private val cicloLinterna = object : Runnable {
+        override fun run() {
+            if (!linternaActiva) return
+            val encendida = pasoLinterna % 2 == 0
+            ponerLinterna(encendida)
+            val espera = patronLinterna[pasoLinterna]
+            pasoLinterna = (pasoLinterna + 1) % patronLinterna.size
+            hiloPrincipal.postDelayed(this, espera)
+        }
+    }
+
+    private fun ponerLinterna(encendida: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val id = camaraFlash ?: return
+        try {
+            (getSystemService(Context.CAMERA_SERVICE) as? CameraManager)?.setTorchMode(id, encendida)
+        } catch (e: Exception) { }
+    }
+
+    private fun linterna(activar: Boolean): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
+        if (!activar) {
+            linternaActiva = false
+            hiloPrincipal.removeCallbacks(cicloLinterna)
+            ponerLinterna(false)
+            return true
+        }
+        if (linternaActiva) return true
+        val camaras = getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return false
+        camaraFlash = try {
+            camaras.cameraIdList.firstOrNull { id ->
+                camaras.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        } catch (e: Exception) {
+            null
+        }
+        if (camaraFlash == null) return false
+        linternaActiva = true
+        pasoLinterna = 0
+        hiloPrincipal.post(cicloLinterna)
+        return true
+    }
+
+    override fun onDestroy() {
+        sirena(false)
+        linterna(false)
+        super.onDestroy()
     }
 
     // ------------------------------------------------------------------

@@ -36,6 +36,17 @@ class Ajustes {
   /// Llamar directamente (sin pasar por el marcador) al contacto principal.
   final bool llamadaDirecta;
 
+  // ---------------- Premium ----------------
+
+  /// Cada cuántos minutos se reenvía la ubicación en vivo por SMS.
+  final int intervaloSeguimientoMin;
+
+  /// Iniciar la ubicación en vivo automáticamente al enviar un S.O.S.
+  final bool seguimientoAutomatico;
+
+  /// Encender la sirena automáticamente al enviar un S.O.S.
+  final bool sirenaAutomatica;
+
   const Ajustes({
     this.nombreUsuario = '',
     this.codigoPais = '57',
@@ -48,6 +59,9 @@ class Ajustes {
     this.whatsappContinuo = true,
     this.vibracionSos = true,
     this.llamadaDirecta = false,
+    this.intervaloSeguimientoMin = 5,
+    this.seguimientoAutomatico = true,
+    this.sirenaAutomatica = false,
   });
 
   Ajustes copyWith({
@@ -62,6 +76,9 @@ class Ajustes {
     bool? whatsappContinuo,
     bool? vibracionSos,
     bool? llamadaDirecta,
+    int? intervaloSeguimientoMin,
+    bool? seguimientoAutomatico,
+    bool? sirenaAutomatica,
   }) {
     return Ajustes(
       nombreUsuario: nombreUsuario ?? this.nombreUsuario,
@@ -76,6 +93,10 @@ class Ajustes {
       whatsappContinuo: whatsappContinuo ?? this.whatsappContinuo,
       vibracionSos: vibracionSos ?? this.vibracionSos,
       llamadaDirecta: llamadaDirecta ?? this.llamadaDirecta,
+      intervaloSeguimientoMin:
+          intervaloSeguimientoMin ?? this.intervaloSeguimientoMin,
+      seguimientoAutomatico: seguimientoAutomatico ?? this.seguimientoAutomatico,
+      sirenaAutomatica: sirenaAutomatica ?? this.sirenaAutomatica,
     );
   }
 
@@ -91,6 +112,9 @@ class Ajustes {
         'whatsappContinuo': whatsappContinuo,
         'vibracionSos': vibracionSos,
         'llamadaDirecta': llamadaDirecta,
+        'intervaloSeguimientoMin': intervaloSeguimientoMin,
+        'seguimientoAutomatico': seguimientoAutomatico,
+        'sirenaAutomatica': sirenaAutomatica,
       };
 
   factory Ajustes.fromJson(Map<String, dynamic> j) {
@@ -98,6 +122,7 @@ class Ajustes {
     String s(String k, String def) => j[k] is String ? j[k] as String : def;
     bool b(String k, bool def) => j[k] is bool ? j[k] as bool : def;
     final seg = j['segundosCuentaRegresiva'];
+    final intervalo = j['intervaloSeguimientoMin'];
     return Ajustes(
       nombreUsuario: s('nombreUsuario', d.nombreUsuario),
       codigoPais: s('codigoPais', d.codigoPais),
@@ -111,6 +136,11 @@ class Ajustes {
       whatsappContinuo: b('whatsappContinuo', d.whatsappContinuo),
       vibracionSos: b('vibracionSos', d.vibracionSos),
       llamadaDirecta: b('llamadaDirecta', d.llamadaDirecta),
+      intervaloSeguimientoMin: intervalo is int
+          ? intervalo.clamp(1, 60).toInt()
+          : d.intervaloSeguimientoMin,
+      seguimientoAutomatico: b('seguimientoAutomatico', d.seguimientoAutomatico),
+      sirenaAutomatica: b('sirenaAutomatica', d.sirenaAutomatica),
     );
   }
 

@@ -139,8 +139,13 @@ class EmergenciaProvider extends ChangeNotifier {
   // MENSAJES
   // ------------------------------------------------------------------
 
-  MensajeAlerta construirMensaje(TipoAlerta tipo, DatosUbicacion? u) =>
-      ConstructorMensajes.construir(tipo: tipo, ajustes: _ajustes, ubicacion: u);
+  MensajeAlerta construirMensaje(TipoAlerta tipo, DatosUbicacion? u, {String? motivo}) =>
+      ConstructorMensajes.construir(
+        tipo: tipo,
+        ajustes: _ajustes,
+        ubicacion: u,
+        motivo: motivo,
+      );
 
   String numeroWhatsApp(Contacto c) => Telefono.internacional(c.telefono, _ajustes.codigoPais);
 

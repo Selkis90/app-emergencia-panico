@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../models/ajustes.dart';
 import '../providers/emergencia_provider.dart';
+import '../providers/premium_provider.dart';
 import '../services/nativo.dart';
 import '../services/ubicacion.dart';
 import '../utils/mensajes.dart';
+import 'premium_screen.dart';
 
 class AjustesScreen extends StatefulWidget {
   const AjustesScreen({super.key});
@@ -117,6 +119,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
   @override
   Widget build(BuildContext context) {
     final p = context.watch<EmergenciaProvider>();
+    final esPremium = context.watch<PremiumProvider>().esPremium;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Ajustes'),
@@ -257,6 +260,51 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 _cambiar(_a.copyWith(llamadaDirecta: v));
               },
             ),
+          const _Titulo('Premium'),
+          if (!esPremium)
+            Card(
+              color: Colors.amber.shade50,
+              child: ListTile(
+                leading: Icon(Icons.workspace_premium, color: Colors.amber.shade800),
+                title: const Text('Desbloquea AlertaYa Premium'),
+                subtitle: const Text('Ubicación en vivo, modo "Llegué bien", sirena y linterna S.O.S.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => abrirPremium(context),
+              ),
+            ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            enabled: esPremium,
+            title: const Text('Ubicación en vivo: enviar cada'),
+            subtitle: const Text('Cada envío es un SMS a cada contacto'),
+            trailing: DropdownButton<int>(
+              value: const [3, 5, 10, 15].contains(_a.intervaloSeguimientoMin)
+                  ? _a.intervaloSeguimientoMin
+                  : 5,
+              items: const [
+                DropdownMenuItem(value: 3, child: Text('3 min')),
+                DropdownMenuItem(value: 5, child: Text('5 min')),
+                DropdownMenuItem(value: 10, child: Text('10 min')),
+                DropdownMenuItem(value: 15, child: Text('15 min')),
+              ],
+              onChanged: esPremium
+                  ? (v) => _cambiar(_a.copyWith(intervaloSeguimientoMin: v ?? 5))
+                  : null,
+            ),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Iniciar ubicación en vivo con cada S.O.S.'),
+            value: _a.seguimientoAutomatico,
+            onChanged: esPremium ? (v) => _cambiar(_a.copyWith(seguimientoAutomatico: v)) : null,
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Encender la sirena con cada S.O.S.'),
+            subtitle: const Text('Desactívalo si en un peligro prefieres no hacer ruido'),
+            value: _a.sirenaAutomatica,
+            onChanged: esPremium ? (v) => _cambiar(_a.copyWith(sirenaAutomatica: v)) : null,
+          ),
           TextButton.icon(
             onPressed: () => Nativo.vibrarSos(),
             icon: const Icon(Icons.vibration),

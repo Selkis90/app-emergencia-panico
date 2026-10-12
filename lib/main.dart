@@ -2,34 +2,46 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/emergencia_provider.dart';
+import 'providers/premium_provider.dart';
+import 'providers/proteccion_provider.dart';
 import 'screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  runApp(const AlertaYaApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key, this.provider});
+class AlertaYaApp extends StatelessWidget {
+  const AlertaYaApp({super.key, this.provider, this.premium});
 
-  /// Permite inyectar un provider en las pruebas.
+  /// Permiten inyectar providers en las pruebas.
   final EmergenciaProvider? provider;
+  final PremiumProvider? premium;
+
+  static const rojo = Color(0xFFD32F2F);
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<EmergenciaProvider>(
-      create: (_) => provider ?? (EmergenciaProvider()..cargar()),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<EmergenciaProvider>(
+          create: (_) => provider ?? (EmergenciaProvider()..cargar()),
+        ),
+        ChangeNotifierProvider<PremiumProvider>(
+          create: (_) => premium ?? PremiumProvider(),
+        ),
+        ChangeNotifierProvider<ProteccionProvider>(
+          create: (ctx) => ProteccionProvider(ctx.read<EmergenciaProvider>()),
+        ),
+      ],
       child: MaterialApp(
-        title: 'Emergencia',
+        title: 'AlertaYa',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFD32F2F),
-            primary: const Color(0xFFD32F2F),
-          ),
+          colorScheme: ColorScheme.fromSeed(seedColor: rojo, primary: rojo),
           useMaterial3: true,
           appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFFD32F2F),
+            backgroundColor: rojo,
             foregroundColor: Colors.white,
             centerTitle: true,
           ),
