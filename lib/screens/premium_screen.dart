@@ -33,6 +33,11 @@ const funcionesPremium = [
     'Linterna S.O.S.',
     'La linterna parpadea en código S.O.S. para que te encuentren de noche.',
   ),
+  FuncionPremium(
+    Icons.perm_media,
+    'Foto, video y audio',
+    'Durante la emergencia toma una foto, graba video o audio y envíalo por WhatsApp con tu ubicación.',
+  ),
 ];
 
 class PremiumScreen extends StatelessWidget {

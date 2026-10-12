@@ -19,6 +19,7 @@ emergencias.
 | Modo "Llegué bien" | Temporizador: si no confirmas que llegaste, envía el S.O.S. solo. |
 | Sirena | Tono de emergencia a todo volumen (canal de alarma). |
 | Linterna S.O.S. | La linterna parpadea ··· ——— ···. |
+| Foto, video y audio | Durante el S.O.S. toma una foto, graba video (60 s) o audio (5 min) y se abre WhatsApp para enviarlo con tu ubicación. |
 
 > La ubicación en vivo y el temporizador funcionan mientras AlertaYa esté abierta o en segundo plano.
 > Si Android cierra la app, el temporizador se revisa apenas se vuelva a abrir.

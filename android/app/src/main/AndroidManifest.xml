@@ -13,6 +13,11 @@
     <!-- Llamar directamente al contacto principal / línea de emergencia -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
+    <!-- Premium: grabar audio como evidencia durante una emergencia.
+         La foto y el video usan la app de cámara del celular, por eso
+         NO se declara el permiso CAMERA (declararlo obligaría a pedirlo). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -43,6 +48,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Premium: comparte fotos, videos y audios con la cámara y con WhatsApp -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.archivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rutas_archivos" />
+        </provider>
     </application>
 
     <!-- Android 11+: sin esto la app NO puede ver WhatsApp ni abrir SMS/llamadas/enlaces -->
@@ -76,6 +92,16 @@
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.VIDEO_CAPTURE" />
         </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

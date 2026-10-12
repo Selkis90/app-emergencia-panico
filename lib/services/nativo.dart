@@ -57,7 +57,7 @@ class Nativo {
 
   // ---------------- Permisos ----------------
 
-  /// permiso: 'contactos' | 'sms' | 'llamada'
+  /// permiso: 'contactos' | 'sms' | 'llamada' | 'microfono'
   static Future<bool> tienePermiso(String permiso) async =>
       (await _invocar<bool>('tienePermiso', {'permiso': permiso})) ?? false;
 
@@ -192,6 +192,43 @@ class Nativo {
   /// Activa o apaga la linterna parpadeando en S.O.S.
   static Future<bool> linterna(bool activar) async =>
       (await _invocar<bool>('linterna', {'activar': activar})) ?? false;
+
+  // ---------------- Premium: evidencia (foto, video, audio) ----------------
+
+  /// Abre la cámara para tomar una foto. Devuelve la ruta del .jpg o null.
+  static Future<String?> tomarFoto() => _invocar<String>('tomarFoto');
+
+  /// Abre la cámara para grabar video (máx. [segundos]). Devuelve la ruta del .mp4 o null.
+  static Future<String?> grabarVideo({int segundos = 60}) =>
+      _invocar<String>('grabarVideo', {'segundos': segundos});
+
+  /// Empieza a grabar audio con el micrófono (pide permiso 'microfono' antes).
+  static Future<bool> iniciarAudio() async =>
+      (await _invocar<bool>('iniciarAudio')) ?? false;
+
+  /// Detiene la grabación y devuelve la ruta del .m4a (null si duró muy poco).
+  static Future<String?> detenerAudio() => _invocar<String>('detenerAudio');
+
+  /// Detiene la grabación y descarta el audio.
+  static Future<void> cancelarAudio() async {
+    await _invocar<bool>('cancelarAudio');
+  }
+
+  /// Envía un archivo con un texto. Con [paquete] abre WhatsApp (elegir chats o
+  /// grupo); sin [paquete] deja elegir la app (Telegram, correo, MMS…).
+  static Future<bool> compartirArchivo(
+    String ruta,
+    String mime,
+    String mensaje, {
+    String? paquete,
+  }) async =>
+      (await _invocar<bool>('compartirArchivo', {
+        'ruta': ruta,
+        'mime': mime,
+        'mensaje': mensaje,
+        'paquete': paquete,
+      })) ??
+      false;
 
   // ---------------- Respaldo ----------------
 

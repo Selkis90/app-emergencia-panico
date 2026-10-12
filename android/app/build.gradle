@@ -59,3 +59,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // FileProvider: compartir fotos, videos y audios (Premium).
+    implementation "androidx.core:core:1.13.1"
+}

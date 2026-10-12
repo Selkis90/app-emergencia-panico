@@ -10,6 +10,7 @@ import '../providers/proteccion_provider.dart';
 import '../services/nativo.dart';
 import '../services/ubicacion.dart';
 import '../utils/mensajes.dart';
+import '../widgets/evidencia.dart';
 import 'premium_screen.dart';
 
 enum _EstadoSms { pendiente, enviando, enviado, sinPermiso, noDisponible, desactivado, sinContactos }
@@ -596,9 +597,26 @@ class _EnvioScreenState extends State<EnvioScreen> with WidgetsBindingObserver {
               ),
             ],
           ),
+          TarjetaEvidencia(
+            esPremium: esPremium,
+            onBloqueado: () => abrirPremium(context),
+            paqueteWhatsApp: _paqueteWhatsApp,
+            textoParaEnviar: _textoEvidencia,
+          ),
         ],
       ),
     );
+  }
+
+  /// Texto que acompaña la foto, el video o el audio.
+  String _textoEvidencia(String tipo) {
+    final nombre = _p.ajustes.nombreUsuario.trim();
+    final enlace = _ubicacion?.datos?.enlaceMaps;
+    final quien = nombre.isEmpty ? '' : ' de $nombre';
+    return [
+      '🆘 *Evidencia ($tipo) de la emergencia$quien*',
+      if (enlace != null) '📍 Ubicación: $enlace',
+    ].join('\n');
   }
 
   Widget _vistaPrevia() {

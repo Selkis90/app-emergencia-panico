@@ -4,10 +4,13 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
+import android.content.ClipData
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.MediaRecorder
 import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
@@ -17,12 +20,15 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import android.provider.Settings
 import android.telephony.SmsManager
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 /**
  * Puente nativo (Android) de la app de emergencia.
@@ -36,6 +42,9 @@ import io.flutter.plugin.common.MethodChannel
  *  - llamar                       (llamada directa o marcador)
  *  - vibrarSos / detenerVibracion
  *  - sirena / linterna            (Premium: alarma sonora y linterna en S.O.S.)
+ *  - tomarFoto / grabarVideo      (Premium: abre la cámara y devuelve la ruta del archivo)
+ *  - iniciarAudio / detenerAudio / cancelarAudio (Premium: graba audio con el micrófono)
+ *  - compartirArchivo             (Premium: envía foto/video/audio por WhatsApp u otra app)
  *  - abrirAjustesApp
  */
 class MainActivity : FlutterActivity() {
@@ -43,6 +52,9 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CANAL = "alertaya/nativo"
         private const val CODIGO_PERMISO = 7301
+        private const val CODIGO_FOTO = 7302
+        private const val CODIGO_VIDEO = 7303
+        private const val CARPETA_EVIDENCIAS = "evidencias"
         private const val WHATSAPP = "com.whatsapp"
         private const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
     }
@@ -112,6 +124,22 @@ class MainActivity : FlutterActivity() {
             }
             "sirena" -> result.success(sirena(call.argument<Boolean>("activar") ?: false))
             "linterna" -> result.success(linterna(call.argument<Boolean>("activar") ?: false))
+            "tomarFoto" -> abrirCamara(CODIGO_FOTO, result, 0)
+            "grabarVideo" -> abrirCamara(CODIGO_VIDEO, result, call.argument<Int>("segundos") ?: 60)
+            "iniciarAudio" -> result.success(iniciarAudio())
+            "detenerAudio" -> result.success(detenerAudio(guardar = true))
+            "cancelarAudio" -> {
+                detenerAudio(guardar = false)
+                result.success(true)
+            }
+            "compartirArchivo" -> result.success(
+                compartirArchivo(
+                    call.argument<String>("ruta") ?: "",
+                    call.argument<String>("mime") ?: "*/*",
+                    call.argument<String>("mensaje") ?: "",
+                    call.argument<String>("paquete")
+                )
+            )
             "abrirAjustesApp" -> {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 intent.data = Uri.parse("package:$packageName")
@@ -129,6 +157,7 @@ class MainActivity : FlutterActivity() {
         "contactos" -> Manifest.permission.READ_CONTACTS
         "sms" -> Manifest.permission.SEND_SMS
         "llamada" -> Manifest.permission.CALL_PHONE
+        "microfono" -> Manifest.permission.RECORD_AUDIO
         else -> null
     }
 
@@ -486,9 +515,175 @@ class MainActivity : FlutterActivity() {
         return true
     }
 
+    // ------------------------------------------------------------------
+    // EVIDENCIA (Premium): foto, video y audio para enviar a los contactos
+    // ------------------------------------------------------------------
+
+    private var resultadoCamara: MethodChannel.Result? = null
+    private var archivoCamara: File? = null
+
+    /** Carpeta privada de la app; se borran las evidencias de más de 7 días. */
+    private fun carpetaEvidencias(): File {
+        val carpeta = File(filesDir, CARPETA_EVIDENCIAS)
+        if (!carpeta.exists()) carpeta.mkdirs()
+        val limite = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        carpeta.listFiles()?.forEach { if (it.lastModified() < limite) it.delete() }
+        return carpeta
+    }
+
+    private fun nuevoArchivo(prefijo: String, extension: String): File =
+        File(carpetaEvidencias(), "${prefijo}_${System.currentTimeMillis()}.$extension")
+
+    private fun uriDe(archivo: File): Uri =
+        FileProvider.getUriForFile(this, "$packageName.archivos", archivo)
+
+    /** Abre la app de cámara del celular. Devuelve a Flutter la ruta del archivo o null. */
+    private fun abrirCamara(codigo: Int, result: MethodChannel.Result, segundos: Int) {
+        if (resultadoCamara != null) {
+            result.error("CAMARA_EN_CURSO", "La cámara ya está abierta", null)
+            return
+        }
+        val esVideo = codigo == CODIGO_VIDEO
+        val archivo = if (esVideo) nuevoArchivo("video", "mp4") else nuevoArchivo("foto", "jpg")
+        val uri = uriDe(archivo)
+        val intent = Intent(if (esVideo) MediaStore.ACTION_VIDEO_CAPTURE else MediaStore.ACTION_IMAGE_CAPTURE)
+        intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+        if (esVideo) {
+            intent.putExtra(MediaStore.EXTRA_DURATION_LIMIT, segundos.coerceIn(5, 300))
+            // Calidad baja: el video pesa poco y llega rápido por WhatsApp.
+            intent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 0)
+        }
+        intent.clipData = ClipData.newRawUri("", uri)
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        resultadoCamara = result
+        archivoCamara = archivo
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, codigo)
+        } catch (e: Exception) {
+            resultadoCamara = null
+            archivoCamara = null
+            result.error("SIN_CAMARA", "No se encontró una app de cámara: ${e.message}", null)
+        }
+    }
+
+    @Deprecated("Se usa startActivityForResult por compatibilidad con FlutterActivity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != CODIGO_FOTO && requestCode != CODIGO_VIDEO) return
+        val result = resultadoCamara ?: return
+        val archivo = archivoCamara
+        resultadoCamara = null
+        archivoCamara = null
+
+        if (resultCode != Activity.RESULT_OK || archivo == null) {
+            archivo?.delete()
+            result.success(null)
+            return
+        }
+        // Algunas cámaras ignoran EXTRA_OUTPUT en video y devuelven su propio archivo.
+        if (archivo.length() == 0L) {
+            val origen = data?.data
+            if (origen != null) {
+                try {
+                    contentResolver.openInputStream(origen)?.use { entrada ->
+                        archivo.outputStream().use { salida -> entrada.copyTo(salida) }
+                    }
+                } catch (e: Exception) { }
+            }
+        }
+        if (archivo.exists() && archivo.length() > 0L) {
+            result.success(archivo.absolutePath)
+        } else {
+            archivo.delete()
+            result.success(null)
+        }
+    }
+
+    private var grabadora: MediaRecorder? = null
+    private var archivoAudio: File? = null
+
+    /** Empieza a grabar audio (.m4a). Devuelve true si arrancó. */
+    private fun iniciarAudio(): Boolean {
+        if (grabadora != null) return true
+        if (!concedido(Manifest.permission.RECORD_AUDIO)) return false
+        val archivo = nuevoArchivo("audio", "m4a")
+        return try {
+            val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(this)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            r.setAudioSource(MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            r.setAudioSamplingRate(44100)
+            r.setAudioEncodingBitRate(64000)
+            r.setOutputFile(archivo.absolutePath)
+            r.prepare()
+            r.start()
+            grabadora = r
+            archivoAudio = archivo
+            true
+        } catch (e: Exception) {
+            archivo.delete()
+            grabadora = null
+            archivoAudio = null
+            false
+        }
+    }
+
+    /** Detiene la grabación. Si [guardar] devuelve la ruta del audio (o null si falló). */
+    private fun detenerAudio(guardar: Boolean): String? {
+        val r = grabadora ?: return null
+        val archivo = archivoAudio
+        grabadora = null
+        archivoAudio = null
+        var ok = true
+        try {
+            r.stop()
+        } catch (e: Exception) {
+            // stop() falla si la grabación duró menos de ~1 segundo.
+            ok = false
+        }
+        try { r.release() } catch (e: Exception) { }
+        if (!guardar || !ok || archivo == null || archivo.length() == 0L) {
+            archivo?.delete()
+            return null
+        }
+        return archivo.absolutePath
+    }
+
+    /** Envía el archivo con un texto. [preferido] = paquete de WhatsApp, o null para elegir la app. */
+    private fun compartirArchivo(ruta: String, mime: String, mensaje: String, preferido: String?): Boolean {
+        val archivo = File(ruta)
+        if (!archivo.exists()) return false
+        val uri = uriDe(archivo)
+        val intent = Intent(Intent.ACTION_SEND)
+        intent.type = mime
+        intent.putExtra(Intent.EXTRA_STREAM, uri)
+        if (mensaje.isNotBlank()) intent.putExtra(Intent.EXTRA_TEXT, mensaje)
+        intent.clipData = ClipData.newRawUri("", uri)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (preferido != null) {
+            val paquete = paqueteWhatsApp(preferido)
+            if (paquete != null) {
+                intent.setPackage(paquete)
+                if (iniciar(intent)) return true
+                intent.setPackage(null)
+            }
+        }
+        val selector = Intent.createChooser(intent, "Enviar evidencia con…")
+        selector.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return iniciar(selector)
+    }
+
     override fun onDestroy() {
         sirena(false)
         linterna(false)
+        detenerAudio(guardar = false)
         super.onDestroy()
     }
 
